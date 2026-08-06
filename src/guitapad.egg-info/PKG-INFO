@@ -1,0 +1,7 @@
+Metadata-Version: 2.4
+Name: guitapad
+Version: 0.1.0
+Summary: Real-time guitar effects processor for Audient EVO 4
+Requires-Python: >=3.12
+Requires-Dist: numpy
+Requires-Dist: sounddevice>=0.5.5
