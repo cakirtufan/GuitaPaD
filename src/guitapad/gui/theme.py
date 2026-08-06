@@ -125,4 +125,12 @@ QProgressBar::chunk {
     background-color: #f5a623;
     border-radius: 6px;
 }
+
+QProgressBar#inputMeter::chunk {
+    background-color: #47c98b;
+}
+
+QProgressBar#outputMeter::chunk {
+    background-color: #f5a623;
+}
 """

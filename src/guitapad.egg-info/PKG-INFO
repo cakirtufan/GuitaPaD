@@ -5,3 +5,8 @@ Summary: Real-time guitar effects processor for Audient EVO 4
 Requires-Python: >=3.12
 Requires-Dist: numpy
 Requires-Dist: sounddevice>=0.5.5
+Provides-Extra: gui
+Requires-Dist: PySide6<7,>=6.8; extra == "gui"
+Provides-Extra: dashboard
+Requires-Dist: streamlit<2,>=1.50; extra == "dashboard"
+Requires-Dist: pandas<3,>=2.2; extra == "dashboard"

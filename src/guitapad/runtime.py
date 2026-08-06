@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 from guitapad.audio.backend import StreamInfo
 from guitapad.audio.config import AudioConfig
@@ -28,9 +29,26 @@ class RuntimeSnapshot:
     block_size_mismatch_count: int
     callback_error_count: int
 
+    input_peak_dbfs: float
+    output_peak_dbfs: float
+
     input_latency_ms: float | None
     output_latency_ms: float | None
     total_latency_ms: float | None
+
+
+def amplitude_to_dbfs(
+    amplitude: float,
+) -> float:
+    """Convert linear full-scale amplitude to dBFS."""
+
+    if amplitude <= 0.0:
+        return -90.0
+
+    return max(
+        -90.0,
+        20.0 * math.log10(amplitude),
+    )
 
 
 class GuitaPadRuntime:
@@ -153,6 +171,12 @@ class GuitaPadRuntime:
             ),
             callback_error_count=(
                 metrics.callback_error_count
+            ),
+            input_peak_dbfs=amplitude_to_dbfs(
+                metrics.input_peak_linear
+            ),
+            output_peak_dbfs=amplitude_to_dbfs(
+                metrics.output_peak_linear
             ),
             input_latency_ms=input_latency_ms,
             output_latency_ms=output_latency_ms,

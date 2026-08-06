@@ -83,6 +83,7 @@ class MainWindow(QMainWindow):
         )
 
         root.addLayout(control_row)
+        root.addWidget(self._build_level_meter_card())
         root.addWidget(self._build_signal_chain_card())
         root.addWidget(
             self._build_performance_card(),
@@ -192,6 +193,73 @@ class MainWindow(QMainWindow):
         layout.addLayout(value_row)
         layout.addWidget(self.master_slider)
         layout.addWidget(note)
+
+        return card
+
+
+    def _build_level_meter_card(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("card")
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(24, 18, 24, 20)
+        layout.setSpacing(10)
+
+        title = QLabel("SIGNAL LEVELS")
+        title.setObjectName("sectionTitle")
+
+        input_header = QHBoxLayout()
+
+        input_name = QLabel("INPUT")
+        input_name.setObjectName("metricName")
+
+        self.input_meter_value = QLabel("-90.0 dBFS")
+        self.input_meter_value.setObjectName("subtitle")
+        self.input_meter_value.setAlignment(
+            Qt.AlignRight | Qt.AlignVCenter
+        )
+
+        input_header.addWidget(input_name)
+        input_header.addStretch()
+        input_header.addWidget(
+            self.input_meter_value
+        )
+
+        self.input_meter = QProgressBar()
+        self.input_meter.setObjectName("inputMeter")
+        self.input_meter.setRange(0, 600)
+        self.input_meter.setValue(0)
+        self.input_meter.setTextVisible(False)
+
+        output_header = QHBoxLayout()
+
+        output_name = QLabel("OUTPUT")
+        output_name.setObjectName("metricName")
+
+        self.output_meter_value = QLabel("-90.0 dBFS")
+        self.output_meter_value.setObjectName("subtitle")
+        self.output_meter_value.setAlignment(
+            Qt.AlignRight | Qt.AlignVCenter
+        )
+
+        output_header.addWidget(output_name)
+        output_header.addStretch()
+        output_header.addWidget(
+            self.output_meter_value
+        )
+
+        self.output_meter = QProgressBar()
+        self.output_meter.setObjectName("outputMeter")
+        self.output_meter.setRange(0, 600)
+        self.output_meter.setValue(0)
+        self.output_meter.setTextVisible(False)
+
+        layout.addWidget(title)
+        layout.addLayout(input_header)
+        layout.addWidget(self.input_meter)
+        layout.addSpacing(4)
+        layout.addLayout(output_header)
+        layout.addWidget(self.output_meter)
 
         return card
 
@@ -379,6 +447,30 @@ class MainWindow(QMainWindow):
             self.latency_value.setText(
                 f"{snapshot.total_latency_ms:.2f} ms"
             )
+
+
+        input_db = max(
+            -60.0,
+            min(0.0, snapshot.input_peak_dbfs),
+        )
+        output_db = max(
+            -60.0,
+            min(0.0, snapshot.output_peak_dbfs),
+        )
+
+        self.input_meter.setValue(
+            round((input_db + 60.0) * 10.0)
+        )
+        self.output_meter.setValue(
+            round((output_db + 60.0) * 10.0)
+        )
+
+        self.input_meter_value.setText(
+            f"{snapshot.input_peak_dbfs:.1f} dBFS"
+        )
+        self.output_meter_value.setText(
+            f"{snapshot.output_peak_dbfs:.1f} dBFS"
+        )
 
         self.callback_value.setText(
             f"{snapshot.maximum_callback_ms:.3f} ms"
