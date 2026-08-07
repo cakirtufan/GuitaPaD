@@ -11,6 +11,7 @@ from guitapad.audio.engine import AudioEngine
 from guitapad.audio.sounddevice_backend import SoundDeviceBackend
 from guitapad.dsp.chain import EffectChain
 from guitapad.dsp.gain import Gain
+from guitapad.dsp.highpass import OnePoleHighPass
 from guitapad.dsp.limiter import HardLimiter
 
 
@@ -31,6 +32,8 @@ class RuntimeSnapshot:
 
     input_peak_dbfs: float
     output_peak_dbfs: float
+    high_pass_enabled: bool
+    input_clip_detected: bool
 
     input_latency_ms: float | None
     output_latency_ms: float | None
@@ -64,6 +67,10 @@ class GuitaPadRuntime:
             block_size=128,
         )
 
+        self.input_high_pass = OnePoleHighPass(
+            cutoff_hz=35.0,
+        )
+
         self.master_gain = Gain(
             linear_gain=initial_master_gain,
         )
@@ -74,6 +81,7 @@ class GuitaPadRuntime:
 
         self.effect_chain = EffectChain(
             [
+                self.input_high_pass,
                 self.master_gain,
                 self.safety_limiter,
             ]
@@ -111,6 +119,14 @@ class GuitaPadRuntime:
 
         value = max(0.0, min(1.0, float(value)))
         self.master_gain.linear_gain = value
+
+    def set_high_pass_enabled(
+        self,
+        enabled: bool,
+    ) -> None:
+        """Enable or bypass the input high-pass filter."""
+
+        self.input_high_pass.enabled = bool(enabled)
 
     def snapshot(self) -> RuntimeSnapshot:
         """Create a lightweight state snapshot for the GUI."""
@@ -151,6 +167,8 @@ class GuitaPadRuntime:
             )
         elif metrics.stream_status_message:
             status = metrics.stream_status_message
+        elif metrics.input_clip_detected:
+            status = "INPUT CLIP"
         elif self.backend.is_running:
             status = "OK"
         else:
@@ -178,6 +196,8 @@ class GuitaPadRuntime:
             output_peak_dbfs=amplitude_to_dbfs(
                 metrics.output_peak_linear
             ),
+            input_clip_detected=metrics.input_clip_detected,
+            high_pass_enabled=self.input_high_pass.enabled,
             input_latency_ms=input_latency_ms,
             output_latency_ms=output_latency_ms,
             total_latency_ms=total_latency_ms,

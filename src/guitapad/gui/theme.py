@@ -88,6 +88,23 @@ QPushButton#stopButton:hover {
     background-color: #343c47;
 }
 
+
+QPushButton#hpfButton {
+    background-color: #252b33;
+    color: #9da7b4;
+    border: 1px solid #3b444f;
+}
+
+QPushButton#hpfButton:checked {
+    background-color: #173b2c;
+    color: #62d69b;
+    border: 1px solid #286848;
+}
+
+QPushButton#hpfButton:hover {
+    border: 1px solid #66717f;
+}
+
 QPushButton:disabled {
     background-color: #20252c;
     color: #606a77;

@@ -90,6 +90,9 @@ class AudioEngine:
                 np.max(self._meter_scratch)
             )
 
+            if input_peak >= 0.999:
+                self.metrics.input_clip_detected = True
+
             self.metrics.input_peak_linear = max(
                 input_peak,
                 self.metrics.input_peak_linear
@@ -148,5 +151,6 @@ class AudioEngine:
 
         self.metrics.input_peak_linear = 0.0
         self.metrics.output_peak_linear = 0.0
+        self.metrics.input_clip_detected = False
 
         self.effect_chain.reset()

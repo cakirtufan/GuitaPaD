@@ -16,3 +16,6 @@ class CallbackMetrics:
     # Decaying peak levels used by GUI meters.
     input_peak_linear: float = 0.0
     output_peak_linear: float = 0.0
+
+    # Latched until the audio engine is stopped/reset.
+    input_clip_detected: bool = False

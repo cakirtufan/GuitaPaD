@@ -274,12 +274,27 @@ class MainWindow(QMainWindow):
         title = QLabel("SIGNAL CHAIN")
         title.setObjectName("sectionTitle")
 
+        header = QHBoxLayout()
+        header.addWidget(title)
+        header.addStretch()
+
+        self.hpf_button = QPushButton("HPF ON")
+        self.hpf_button.setObjectName("hpfButton")
+        self.hpf_button.setCheckable(True)
+        self.hpf_button.setChecked(True)
+        self.hpf_button.clicked.connect(
+            self.high_pass_toggled
+        )
+
+        header.addWidget(self.hpf_button)
+
         chain = QHBoxLayout()
         chain.setSpacing(10)
 
         for index, name in enumerate(
             [
                 "INPUT 1",
+                "HPF 35 Hz",
                 "MASTER GAIN",
                 "SAFETY LIMITER",
                 "OUTPUT 1?2",
@@ -297,7 +312,7 @@ class MainWindow(QMainWindow):
                 arrow.setAlignment(Qt.AlignCenter)
                 chain.addWidget(arrow)
 
-        outer.addWidget(title)
+        outer.addLayout(header)
         outer.addLayout(chain)
 
         return card
@@ -428,11 +443,48 @@ class MainWindow(QMainWindow):
                 f"{db_value:.1f} dB"
             )
 
+    @Slot(bool)
+    def high_pass_toggled(
+        self,
+        enabled: bool,
+    ) -> None:
+        self.runtime.set_high_pass_enabled(
+            enabled
+        )
+
+        self._update_hpf_button(enabled)
+
+    def _update_hpf_button(
+        self,
+        enabled: bool,
+    ) -> None:
+        desired_text = (
+            "HPF ON"
+            if enabled
+            else "HPF BYPASS"
+        )
+
+        # Avoid touching Qt state during every 100 ms metrics refresh
+        # when nothing has actually changed.
+        if (
+            self.hpf_button.isChecked() == enabled
+            and self.hpf_button.text() == desired_text
+        ):
+            return
+
+        self.hpf_button.blockSignals(True)
+        self.hpf_button.setChecked(enabled)
+        self.hpf_button.setText(desired_text)
+        self.hpf_button.blockSignals(False)
+
     @Slot()
     def refresh_metrics(self) -> None:
         snapshot = self.runtime.snapshot()
 
         self._update_status(snapshot)
+        self._update_hpf_button(
+            snapshot.high_pass_enabled
+        )
 
         self.start_button.setEnabled(
             not snapshot.running
