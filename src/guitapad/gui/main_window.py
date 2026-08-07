@@ -288,6 +288,22 @@ class MainWindow(QMainWindow):
 
         header.addWidget(self.hpf_button)
 
+        self.overdrive_button = QPushButton(
+            "OVERDRIVE ON"
+        )
+        self.overdrive_button.setObjectName(
+            "overdriveButton"
+        )
+        self.overdrive_button.setCheckable(True)
+        self.overdrive_button.setChecked(True)
+        self.overdrive_button.clicked.connect(
+            self.overdrive_toggled
+        )
+
+        header.addWidget(
+            self.overdrive_button
+        )
+
         chain = QHBoxLayout()
         chain.setSpacing(10)
 
@@ -295,6 +311,7 @@ class MainWindow(QMainWindow):
             [
                 "INPUT 1",
                 "HPF 35 Hz",
+                "OVERDRIVE",
                 "MASTER GAIN",
                 "SAFETY LIMITER",
                 "OUTPUT 1?2",
@@ -477,6 +494,45 @@ class MainWindow(QMainWindow):
         self.hpf_button.setText(desired_text)
         self.hpf_button.blockSignals(False)
 
+    @Slot(bool)
+    def overdrive_toggled(
+        self,
+        enabled: bool,
+    ) -> None:
+        self.runtime.set_overdrive_enabled(
+            enabled
+        )
+
+        self._update_overdrive_button(
+            enabled
+        )
+
+    def _update_overdrive_button(
+        self,
+        enabled: bool,
+    ) -> None:
+        desired_text = (
+            "OVERDRIVE ON"
+            if enabled
+            else "OVERDRIVE BYPASS"
+        )
+
+        if (
+            self.overdrive_button.isChecked() == enabled
+            and self.overdrive_button.text()
+            == desired_text
+        ):
+            return
+
+        self.overdrive_button.blockSignals(True)
+        self.overdrive_button.setChecked(
+            enabled
+        )
+        self.overdrive_button.setText(
+            desired_text
+        )
+        self.overdrive_button.blockSignals(False)
+
     @Slot()
     def refresh_metrics(self) -> None:
         snapshot = self.runtime.snapshot()
@@ -484,6 +540,9 @@ class MainWindow(QMainWindow):
         self._update_status(snapshot)
         self._update_hpf_button(
             snapshot.high_pass_enabled
+        )
+        self._update_overdrive_button(
+            snapshot.overdrive_enabled
         )
 
         self.start_button.setEnabled(

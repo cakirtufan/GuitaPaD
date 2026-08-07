@@ -105,6 +105,23 @@ QPushButton#hpfButton:hover {
     border: 1px solid #66717f;
 }
 
+
+QPushButton#overdriveButton {
+    background-color: #252b33;
+    color: #9da7b4;
+    border: 1px solid #3b444f;
+}
+
+QPushButton#overdriveButton:checked {
+    background-color: #553113;
+    color: #ffb85c;
+    border: 1px solid #9a5b20;
+}
+
+QPushButton#overdriveButton:hover {
+    border: 1px solid #8b96a5;
+}
+
 QPushButton:disabled {
     background-color: #20252c;
     color: #606a77;
