@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 
 from guitapad.audio.config import AudioConfig
+from guitapad.audio.di_recorder import DiRecorder
 from guitapad.audio.metrics import CallbackMetrics
 from guitapad.dsp.chain import EffectChain
 
@@ -41,6 +42,13 @@ class AudioEngine:
         self._meter_decay = math.exp(
             -config.block_size
             / (config.sample_rate * 0.30)
+        )
+
+        # Raw input recording buffer.
+        # Recording is captured before all DSP.
+        self.di_recorder = DiRecorder(
+            sample_rate=config.sample_rate,
+            max_seconds=12.0,
         )
 
         self.effect_chain.prepare(
@@ -97,6 +105,12 @@ class AudioEngine:
                 input_peak,
                 self.metrics.input_peak_linear
                 * self._meter_decay,
+            )
+
+            # Raw DI capture: before HPF, drive,
+            # master gain and limiter.
+            self.di_recorder.capture(
+                mono_signal
             )
 
             self.effect_chain.process(

@@ -122,6 +122,23 @@ QPushButton#overdriveButton:hover {
     border: 1px solid #8b96a5;
 }
 
+
+QPushButton#recordButton {
+    background-color: #292f38;
+    color: #e9ecef;
+    border: 1px solid #404956;
+}
+
+QPushButton#recordButton:hover {
+    background-color: #343c47;
+}
+
+QPushButton#recordButton:checked {
+    background-color: #5b2020;
+    color: #ff8b8b;
+    border: 1px solid #a33d3d;
+}
+
 QPushButton:disabled {
     background-color: #20252c;
     color: #606a77;

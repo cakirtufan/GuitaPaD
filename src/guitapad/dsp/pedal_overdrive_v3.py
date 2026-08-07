@@ -1,4 +1,4 @@
-"""Simple nonlinear soft-clipping overdrive."""
+"""Frequency-selective pedal-style overdrive."""
 
 from __future__ import annotations
 
@@ -10,41 +10,42 @@ from guitapad.dsp.base import AudioBlock, Effect
 from guitapad.dsp.highpass import OnePoleHighPass
 
 
-class SoftClipOverdrive(Effect):
-    """Symmetric tanh overdrive with smooth drive and bypass."""
+class PedalOverdriveV3(Effect):
+    """Frequency-selective asymmetric overdrive.
+
+    Instead of boosting the complete guitar signal:
+
+        driven = dry + (gain - 1) * high_pass(dry)
+
+    Low frequencies therefore remain close to unity gain while
+    mids/highs receive progressively more drive.
+    """
 
     def __init__(
         self,
         drive_db: float = 12.0,
-        level: float = 0.60,
+        level: float = 0.55,
         smoothing_time_seconds: float = 0.020,
     ) -> None:
-        if smoothing_time_seconds < 0.0:
-            raise ValueError(
-                "smoothing_time_seconds cannot be negative."
-            )
-
         self._drive_db = float(drive_db)
         self._level = float(level)
+        self._enabled = True
 
-        # Remove low-end energy before nonlinear clipping.
-        # This does NOT affect the dry/bypass path.
-        self._pre_drive_high_pass = OnePoleHighPass(
-            cutoff_hz=150.0,
+        self._positive_shape = 1.8
+        self._negative_shape = 2.8
+
+        self._positive_norm = (
+            1.0 / math.tanh(self._positive_shape)
+        )
+        self._negative_norm = (
+            1.0 / math.tanh(self._negative_shape)
         )
 
-        if self._level < 0.0:
-            raise ValueError(
-                "level cannot be negative."
-            )
-
-        self._target_pre_gain = self._db_to_gain(
+        self._target_gain = self._db_to_gain(
             self._drive_db
         )
-        self._current_pre_gain = self._target_pre_gain
-        self._active_pre_gain = self._target_pre_gain
-
-        self._enabled = True
+        self._current_gain = self._target_gain
+        self._active_gain = self._target_gain
 
         self._current_mix = 1.0
         self._active_target_mix = 1.0
@@ -60,7 +61,19 @@ class SoftClipOverdrive(Effect):
         self._block_size = 0
         self._channels = 0
 
-        self._dry_scratch = np.empty(
+        self._dry = np.empty(
+            (0, 0),
+            dtype=np.float32,
+        )
+        self._drive_band = np.empty(
+            (0, 0),
+            dtype=np.float32,
+        )
+        self._positive = np.empty(
+            (0, 0),
+            dtype=np.float32,
+        )
+        self._negative = np.empty(
             (0, 0),
             dtype=np.float32,
         )
@@ -69,15 +82,23 @@ class SoftClipOverdrive(Effect):
             0,
             dtype=np.float32,
         )
-
         self._drive_ramp = np.empty(
             0,
             dtype=np.float32,
         )
-
         self._mix_ramp = np.empty(
             0,
             dtype=np.float32,
+        )
+
+        # Only this part receives the additional drive.
+        self._drive_high_pass = OnePoleHighPass(
+            cutoff_hz=700.0,
+        )
+
+        # Remove DC produced by asymmetric clipping.
+        self._dc_blocker = OnePoleHighPass(
+            cutoff_hz=20.0,
         )
 
     @staticmethod
@@ -99,7 +120,7 @@ class SoftClipOverdrive(Effect):
         )
 
         self._drive_db = value
-        self._target_pre_gain = self._db_to_gain(
+        self._target_gain = self._db_to_gain(
             value
         )
 
@@ -109,14 +130,10 @@ class SoftClipOverdrive(Effect):
 
     @level.setter
     def level(self, value: float) -> None:
-        value = float(value)
-
-        if value < 0.0:
-            raise ValueError(
-                "level cannot be negative."
-            )
-
-        self._level = value
+        self._level = max(
+            0.0,
+            float(value),
+        )
 
     @property
     def enabled(self) -> bool:
@@ -132,37 +149,33 @@ class SoftClipOverdrive(Effect):
         block_size: int,
         channels: int,
     ) -> None:
-        if sample_rate <= 0.0:
-            raise ValueError(
-                "sample_rate must be positive."
-            )
-
-        if block_size <= 0:
-            raise ValueError(
-                "block_size must be positive."
-            )
-
-        if channels <= 0:
-            raise ValueError(
-                "channels must be positive."
-            )
-
         self._block_size = block_size
         self._channels = channels
-
-        self._pre_drive_high_pass.prepare(
-            sample_rate=sample_rate,
-            block_size=block_size,
-            channels=channels,
-        )
 
         self._smoothing_samples = round(
             sample_rate
             * self._smoothing_time_seconds
         )
 
-        self._dry_scratch = np.empty(
-            (block_size, channels),
+        shape = (
+            block_size,
+            channels,
+        )
+
+        self._dry = np.empty(
+            shape,
+            dtype=np.float32,
+        )
+        self._drive_band = np.empty(
+            shape,
+            dtype=np.float32,
+        )
+        self._positive = np.empty(
+            shape,
+            dtype=np.float32,
+        )
+        self._negative = np.empty(
+            shape,
             dtype=np.float32,
         )
 
@@ -176,52 +189,78 @@ class SoftClipOverdrive(Effect):
             block_size,
             dtype=np.float32,
         )
-
         self._mix_ramp = np.empty(
             block_size,
             dtype=np.float32,
         )
 
-        self._current_pre_gain = (
-            self._target_pre_gain
+        self._drive_high_pass.prepare(
+            sample_rate,
+            block_size,
+            channels,
         )
-        self._active_pre_gain = (
-            self._target_pre_gain
+
+        self._dc_blocker.prepare(
+            sample_rate,
+            block_size,
+            channels,
         )
+
+        self._current_gain = self._target_gain
+        self._active_gain = self._target_gain
         self._drive_samples_remaining = 0
 
         target_mix = (
-            1.0
-            if self._enabled
-            else 0.0
+            1.0 if self._enabled else 0.0
         )
 
         self._current_mix = target_mix
         self._active_target_mix = target_mix
         self._bypass_samples_remaining = 0
 
-    def _apply_drive(
+    def _apply_frequency_selective_drive(
         self,
         audio_block: AudioBlock,
+        dry: AudioBlock,
     ) -> None:
         frames = audio_block.shape[0]
-        target = self._target_pre_gain
 
-        if target != self._active_pre_gain:
-            self._active_pre_gain = target
+        band = self._drive_band[:frames]
+
+        np.copyto(
+            band,
+            dry,
+        )
+
+        self._drive_high_pass.process(
+            band
+        )
+
+        target = self._target_gain
+
+        if target != self._active_gain:
+            self._active_gain = target
             self._drive_samples_remaining = (
                 self._smoothing_samples
             )
 
-        if (
-            self._drive_samples_remaining <= 0
-            or self._smoothing_samples == 0
-        ):
-            self._current_pre_gain = target
+        if self._drive_samples_remaining <= 0:
+            self._current_gain = target
 
             np.multiply(
+                band,
+                target - 1.0,
+                out=band,
+            )
+
+            np.copyto(
                 audio_block,
-                target,
+                dry,
+            )
+
+            np.add(
+                audio_block,
+                band,
                 out=audio_block,
             )
             return
@@ -231,33 +270,58 @@ class SoftClipOverdrive(Effect):
             self._drive_samples_remaining,
         )
 
-        gain_step = (
-            target - self._current_pre_gain
+        step = (
+            target - self._current_gain
         ) / self._drive_samples_remaining
 
         np.multiply(
             self._ramp_positions[:ramp_frames],
-            gain_step,
+            step,
             out=self._drive_ramp[:ramp_frames],
         )
 
         np.add(
             self._drive_ramp[:ramp_frames],
-            self._current_pre_gain,
+            self._current_gain,
+            out=self._drive_ramp[:ramp_frames],
+        )
+
+        self._current_gain = float(
+            self._drive_ramp[ramp_frames - 1]
+        )
+
+        # Convert total gain to EXTRA high-band gain.
+        np.subtract(
+            self._drive_ramp[:ramp_frames],
+            1.0,
             out=self._drive_ramp[:ramp_frames],
         )
 
         np.multiply(
-            audio_block[:ramp_frames],
+            band[:ramp_frames],
             self._drive_ramp[
                 :ramp_frames,
                 np.newaxis,
             ],
-            out=audio_block[:ramp_frames],
+            out=band[:ramp_frames],
         )
 
-        self._current_pre_gain = float(
-            self._drive_ramp[ramp_frames - 1]
+        if ramp_frames < frames:
+            np.multiply(
+                band[ramp_frames:],
+                target - 1.0,
+                out=band[ramp_frames:],
+            )
+
+        np.copyto(
+            audio_block,
+            dry,
+        )
+
+        np.add(
+            audio_block,
+            band,
+            out=audio_block,
         )
 
         self._drive_samples_remaining -= (
@@ -265,14 +329,68 @@ class SoftClipOverdrive(Effect):
         )
 
         if self._drive_samples_remaining <= 0:
-            self._current_pre_gain = target
+            self._current_gain = target
 
-        if ramp_frames < frames:
-            np.multiply(
-                audio_block[ramp_frames:],
-                target,
-                out=audio_block[ramp_frames:],
-            )
+    def _clip(
+        self,
+        audio_block: AudioBlock,
+    ) -> None:
+        frames = audio_block.shape[0]
+
+        positive = self._positive[:frames]
+        negative = self._negative[:frames]
+
+        np.maximum(
+            audio_block,
+            0.0,
+            out=positive,
+        )
+
+        np.multiply(
+            positive,
+            self._positive_shape,
+            out=positive,
+        )
+
+        np.tanh(
+            positive,
+            out=positive,
+        )
+
+        np.multiply(
+            positive,
+            self._positive_norm,
+            out=positive,
+        )
+
+        np.minimum(
+            audio_block,
+            0.0,
+            out=negative,
+        )
+
+        np.multiply(
+            negative,
+            self._negative_shape,
+            out=negative,
+        )
+
+        np.tanh(
+            negative,
+            out=negative,
+        )
+
+        np.multiply(
+            negative,
+            self._negative_norm,
+            out=negative,
+        )
+
+        np.add(
+            positive,
+            negative,
+            out=audio_block,
+        )
 
     def process(
         self,
@@ -285,34 +403,27 @@ class SoftClipOverdrive(Effect):
 
         if channels != self._channels:
             raise RuntimeError(
-                "Audio channel count changed after prepare()."
+                "Audio channel count changed."
             )
 
-        if frames > self._block_size:
-            raise RuntimeError(
-                "Audio block is larger than prepared block size."
-            )
-
-        dry = self._dry_scratch[:frames]
+        dry = self._dry[:frames]
 
         np.copyto(
             dry,
             audio_block,
         )
 
-        # Wet path:
-        # 150 Hz HPF -> Drive -> tanh -> Level
-        self._pre_drive_high_pass.process(
-            audio_block
-        )
-
-        self._apply_drive(
-            audio_block
-        )
-
-        np.tanh(
+        self._apply_frequency_selective_drive(
             audio_block,
-            out=audio_block,
+            dry,
+        )
+
+        self._clip(
+            audio_block
+        )
+
+        self._dc_blocker.process(
+            audio_block
         )
 
         np.multiply(
@@ -322,9 +433,7 @@ class SoftClipOverdrive(Effect):
         )
 
         target_mix = (
-            1.0
-            if self._enabled
-            else 0.0
+            1.0 if self._enabled else 0.0
         )
 
         if target_mix != self._active_target_mix:
@@ -333,10 +442,7 @@ class SoftClipOverdrive(Effect):
                 self._smoothing_samples
             )
 
-        if (
-            self._bypass_samples_remaining <= 0
-            or self._smoothing_samples == 0
-        ):
+        if self._bypass_samples_remaining <= 0:
             self._current_mix = target_mix
 
             if target_mix <= 0.0:
@@ -352,13 +458,13 @@ class SoftClipOverdrive(Effect):
             self._bypass_samples_remaining,
         )
 
-        mix_step = (
+        step = (
             target_mix - self._current_mix
         ) / self._bypass_samples_remaining
 
         np.multiply(
             self._ramp_positions[:ramp_frames],
-            mix_step,
+            step,
             out=self._mix_ramp[:ramp_frames],
         )
 
@@ -410,22 +516,18 @@ class SoftClipOverdrive(Effect):
             )
 
     def reset(self) -> None:
-        self._pre_drive_high_pass.reset()
+        self._drive_high_pass.reset()
+        self._dc_blocker.reset()
 
-        self._current_pre_gain = (
-            self._target_pre_gain
-        )
-        self._active_pre_gain = (
-            self._target_pre_gain
-        )
+        self._current_gain = self._target_gain
+        self._active_gain = self._target_gain
+
         self._drive_samples_remaining = 0
+        self._bypass_samples_remaining = 0
 
         target_mix = (
-            1.0
-            if self._enabled
-            else 0.0
+            1.0 if self._enabled else 0.0
         )
 
         self._current_mix = target_mix
         self._active_target_mix = target_mix
-        self._bypass_samples_remaining = 0

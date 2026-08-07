@@ -45,6 +45,7 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.runtime = runtime
+        self._di_save_pending = False
 
         self.setWindowTitle("GuitaPaD")
         self.setMinimumSize(940, 680)
@@ -99,8 +100,8 @@ class MainWindow(QMainWindow):
         title.setObjectName("title")
 
         subtitle = QLabel(
-            "Real-time guitar processing ? "
-            "Audient EVO 4 ? ASIO"
+            "Real-time guitar processing | "
+            "Audient EVO 4 | ASIO"
         )
         subtitle.setObjectName("subtitle")
 
@@ -141,10 +142,30 @@ class MainWindow(QMainWindow):
             self.stop_audio
         )
 
+        self.record_button = QPushButton(
+            "RECORD DI"
+        )
+        self.record_button.setObjectName(
+            "recordButton"
+        )
+        self.record_button.setCheckable(True)
+        self.record_button.clicked.connect(
+            self.toggle_di_recording
+        )
+
+        self.recording_note = QLabel(
+            "Raw input | 24-bit WAV | max 10 s"
+        )
+        self.recording_note.setObjectName(
+            "subtitle"
+        )
+
         layout.addWidget(section_title)
         layout.addSpacing(6)
         layout.addWidget(self.start_button)
         layout.addWidget(self.stop_button)
+        layout.addWidget(self.record_button)
+        layout.addWidget(self.recording_note)
         layout.addStretch()
 
         return card
@@ -311,10 +332,10 @@ class MainWindow(QMainWindow):
             [
                 "INPUT 1",
                 "HPF 35 Hz",
-                "OVERDRIVE",
+                "OVERDRIVE V3",
                 "MASTER GAIN",
                 "SAFETY LIMITER",
-                "OUTPUT 1?2",
+                "OUTPUT 1/2",
             ]
         ):
             label = QLabel(name)
@@ -324,13 +345,56 @@ class MainWindow(QMainWindow):
             chain.addWidget(label)
 
             if index < 3:
-                arrow = QLabel("?")
+                arrow = QLabel("->")
                 arrow.setObjectName("subtitle")
                 arrow.setAlignment(Qt.AlignCenter)
                 chain.addWidget(arrow)
 
         outer.addLayout(header)
         outer.addLayout(chain)
+
+        drive_row = QHBoxLayout()
+
+        drive_name = QLabel("DRIVE")
+        drive_name.setObjectName("metricName")
+
+        self.overdrive_drive_slider = QSlider(
+            Qt.Horizontal
+        )
+        self.overdrive_drive_slider.setRange(
+            0,
+            36,
+        )
+        self.overdrive_drive_slider.setValue(
+            12
+        )
+        self.overdrive_drive_slider.valueChanged.connect(
+            self.overdrive_drive_changed
+        )
+
+        self.overdrive_drive_value = QLabel(
+            "12 dB"
+        )
+        self.overdrive_drive_value.setObjectName(
+            "subtitle"
+        )
+        self.overdrive_drive_value.setMinimumWidth(
+            55
+        )
+        self.overdrive_drive_value.setAlignment(
+            Qt.AlignRight | Qt.AlignVCenter
+        )
+
+        drive_row.addWidget(drive_name)
+        drive_row.addWidget(
+            self.overdrive_drive_slider,
+            stretch=1,
+        )
+        drive_row.addWidget(
+            self.overdrive_drive_value
+        )
+
+        outer.addLayout(drive_row)
 
         return card
 
@@ -405,7 +469,7 @@ class MainWindow(QMainWindow):
         column: int,
         name: str,
     ) -> QLabel:
-        value = QLabel("?")
+        value = QLabel("->")
         value.setObjectName("metricValue")
 
         label = QLabel(name)
@@ -415,6 +479,95 @@ class MainWindow(QMainWindow):
         layout.addWidget(label, 1, column)
 
         return value
+
+    @Slot()
+    def toggle_di_recording(self) -> None:
+        if self.runtime.is_di_recording:
+            self._stop_di_and_schedule_save()
+            return
+
+        try:
+            self.runtime.start_di_recording()
+        except Exception as error:
+            QMessageBox.critical(
+                self,
+                "DI recording error",
+                str(error),
+            )
+            return
+
+        self.record_button.setChecked(True)
+        self.record_button.setText(
+            "STOP RECORDING"
+        )
+        self.recording_note.setText(
+            "Recording raw Input 1..."
+        )
+
+        # Safety auto-stop at ten seconds.
+        QTimer.singleShot(
+            10_000,
+            self._auto_stop_di_recording,
+        )
+
+    @Slot()
+    def _auto_stop_di_recording(self) -> None:
+        if self.runtime.is_di_recording:
+            self._stop_di_and_schedule_save()
+
+    def _stop_di_and_schedule_save(self) -> None:
+        if not self.runtime.is_di_recording:
+            return
+
+        self.runtime.stop_di_recording()
+
+        self._di_save_pending = True
+
+        self.record_button.setEnabled(False)
+        self.record_button.setText(
+            "SAVING..."
+        )
+
+        # Give any in-flight callback plenty of time
+        # to leave the preallocated recording buffer.
+        QTimer.singleShot(
+            40,
+            self._save_di_recording,
+        )
+
+    @Slot()
+    def _save_di_recording(self) -> None:
+        try:
+            path = (
+                self.runtime.save_di_recording()
+            )
+
+            self.recording_note.setText(
+                f"Saved: recordings/{path.name}"
+            )
+
+        except Exception as error:
+            QMessageBox.critical(
+                self,
+                "DI recording error",
+                str(error),
+            )
+
+            self.recording_note.setText(
+                "Recording was not saved"
+            )
+
+        finally:
+            self._di_save_pending = False
+
+            self.record_button.setChecked(
+                False
+            )
+            self.record_button.setText(
+                "RECORD DI"
+            )
+
+            self.refresh_metrics()
 
     @Slot()
     def start_audio(self) -> None:
@@ -431,6 +584,9 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def stop_audio(self) -> None:
+        if self.runtime.is_di_recording:
+            self._stop_di_and_schedule_save()
+
         self.runtime.stop()
         self.refresh_metrics()
 
@@ -454,7 +610,7 @@ class MainWindow(QMainWindow):
         )
 
         if db_value <= -90.0:
-            self.master_db.setText("-? dB")
+            self.master_db.setText("-inf dB")
         else:
             self.master_db.setText(
                 f"{db_value:.1f} dB"
@@ -533,6 +689,45 @@ class MainWindow(QMainWindow):
         )
         self.overdrive_button.blockSignals(False)
 
+    @Slot(int)
+    def overdrive_drive_changed(
+        self,
+        value: int,
+    ) -> None:
+        self.runtime.set_overdrive_drive_db(
+            float(value)
+        )
+
+        self.overdrive_drive_value.setText(
+            f"{value} dB"
+        )
+
+    def _update_overdrive_drive(
+        self,
+        drive_db: float,
+    ) -> None:
+        value = round(drive_db)
+
+        if (
+            self.overdrive_drive_slider.value()
+            == value
+        ):
+            return
+
+        self.overdrive_drive_slider.blockSignals(
+            True
+        )
+        self.overdrive_drive_slider.setValue(
+            value
+        )
+        self.overdrive_drive_slider.blockSignals(
+            False
+        )
+
+        self.overdrive_drive_value.setText(
+            f"{value} dB"
+        )
+
     @Slot()
     def refresh_metrics(self) -> None:
         snapshot = self.runtime.snapshot()
@@ -544,6 +739,9 @@ class MainWindow(QMainWindow):
         self._update_overdrive_button(
             snapshot.overdrive_enabled
         )
+        self._update_overdrive_drive(
+            snapshot.overdrive_drive_db
+        )
 
         self.start_button.setEnabled(
             not snapshot.running
@@ -552,8 +750,13 @@ class MainWindow(QMainWindow):
             snapshot.running
         )
 
+        if not self._di_save_pending:
+            self.record_button.setEnabled(
+                snapshot.running
+            )
+
         if snapshot.total_latency_ms is None:
-            self.latency_value.setText("?")
+            self.latency_value.setText("--")
         else:
             self.latency_value.setText(
                 f"{snapshot.total_latency_ms:.2f} ms"
@@ -615,7 +818,7 @@ class MainWindow(QMainWindow):
         ):
             self.error_label.setText(
                 "Callback errors: "
-                f"{snapshot.callback_error_count} ? "
+                f"{snapshot.callback_error_count} | "
                 "Block mismatches: "
                 f"{snapshot.block_size_mismatch_count}"
             )
