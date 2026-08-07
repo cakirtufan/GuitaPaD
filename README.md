@@ -1,45 +1,224 @@
 # GuitaPaD
 
-**GuitaPaD** is an experimental real-time guitar effects processor written in Python.
+**GuitaPaD** is an open-source adaptive guitar tone platform built with Python, real-time DSP, and machine learning.
 
-The idea is simple: use a regular audio interface as the front end, build the DSP ourselves, and keep the system readable enough to understand what every stage is doing.
+The long-term goal is not just to provide a collection of guitar effects. GuitaPaD aims to **listen to a reference guitar tone, analyse its character, and automatically adapt an interpretable DSP signal chain to move the player's own guitar toward that target tone**.
 
-The project is currently developed and tested with an **Audient EVO 4** on Windows using **ASIO**, but the long-term goal is to make it easy to use with other audio interfaces as well.
+A typical future workflow could look like this:
 
-> GuitaPaD is still under active development. Expect experiments, changing DSP models, and occasional rough edges.
+```text
+Reference guitar tone
+        |
+        v
+Tone analysis / ML representation
+        |
+        v
+Target tone
+        ^
+        |
+Your guitar DI
+        |
+        v
+GuitaPaD DSP chain
+        |
+        v
+Rendered tone
+        |
+        v
+Compare -> optimise -> refine
+```
 
-## What works today
+Instead of a fixed preset saying "these are the settings for this song", the idea is:
 
-- Real-time guitar input/output
-- Low-latency ASIO audio stream
+> **Given your guitar and your audio interface, find the DSP settings that best reproduce the character of a chosen reference tone.**
+
+The project is currently developed and tested with an **Audient EVO 4** on Windows using **ASIO**, but the architecture is intended to support other interfaces and platforms.
+
+> GuitaPaD is still experimental. The real-time engine is working, while the adaptive tone-matching system is the main development direction.
+
+---
+
+## Why GuitaPaD?
+
+Most guitar software offers fixed effects, amp models, or presets.
+
+GuitaPaD is being designed around a different question:
+
+> Can we build an open system that understands a reference tone and adapts itself to the player's actual input signal?
+
+That turns guitar tone matching into a hybrid **DSP + optimisation + machine-learning problem**.
+
+The DSP chain remains explicit and inspectable. Machine learning is used to analyse tones, estimate useful starting parameters, and guide the search for a better match.
+
+The aim is not to hide everything inside a black-box neural network.
+
+---
+
+## Project philosophy
+
+GuitaPaD follows a few core principles:
+
+- **Interpretable DSP first**  
+  Effects, amp stages, tone shaping, cabinets, and other processing blocks should remain understandable and measurable.
+
+- **Machine learning where it adds value**  
+  ML should help analyse reference tones, estimate parameters, build perceptual representations, and accelerate optimisation.
+
+- **Measure before optimising**  
+  Latency, callback time, signal levels, spectral behaviour, and listening results are measured rather than assumed.
+
+- **Python first**  
+  Python is used for readability, experimentation, DSP research, data analysis, and ML development.
+
+- **Native code only when justified**  
+  C++/JUCE or another lower-level implementation should be introduced only when profiling shows a real need.
+
+- **Community-friendly tone recipes**  
+  Tone configurations should eventually be shareable as open parameter files rather than opaque proprietary presets.
+
+---
+
+## Current status
+
+The real-time foundation is already working.
+
+Current features include:
+
+- Real-time guitar input and output
+- ASIO audio backend
 - 48 kHz processing
-- 128-sample target buffer
-- Modular DSP effect chain
+- 128-sample target callback
+- Modular in-place DSP chain
 - 35 Hz high-pass filter
-- Master gain and safety limiter
+- Master gain
+- Safety limiter
 - Experimental overdrive models
-- PySide6 desktop interface
-- Input/output level metering
+- PySide6 desktop GUI
+- Input/output metering
 - Callback timing and deadline monitoring
-- Raw DI recording to 24-bit WAV
+- Raw DI recording
+- 24-bit mono WAV export
 - Offline DSP analysis tools
 
-The current Python/NumPy implementation still has substantial real-time headroom on the development system.
+The current Audient EVO 4 setup reports approximately:
 
-## Requirements
+```text
+Sample rate       48,000 Hz
+Callback          128 samples
+Total I/O latency ~9.79 ms
+```
 
-- Python 3.12+
-- An audio interface
-- A low-latency audio driver
-- Git
+During recent DSP + DI-recording tests, maximum callback time remained around 20% of the available callback deadline.
 
-On Windows, **ASIO is strongly recommended**.
+This means the immediate bottleneck is currently **tone modelling**, not Python callback performance.
 
-Main Python dependencies:
+---
 
-- NumPy
-- sounddevice / PortAudio
-- PySide6
+## Where the project is going
+
+The intended tone engine is larger than a single distortion effect.
+
+A future signal path may look roughly like this:
+
+```text
+Guitar DI
+   |
+Input calibration
+   |
+Gate
+   |
+Pre-EQ / tightening
+   |
+Nonlinear amp stages
+   |
+Tone stack
+   |
+Power-amp shaping
+   |
+Cabinet
+   |
+Microphone / spatial shaping
+   |
+Post-EQ
+   |
+Output
+```
+
+The tone matcher will control parameters across this chain.
+
+Conceptually:
+
+```text
+y = DSP(x, theta)
+```
+
+where:
+
+- `x` is the player's DI guitar signal
+- `theta` contains controllable DSP parameters
+- `y` is the rendered output
+
+A reference tone is converted into a target representation:
+
+```text
+z_target = Analyse(reference)
+```
+
+The rendered tone is analysed using the same representation:
+
+```text
+z_current = Analyse(DSP(x, theta))
+```
+
+The system then searches for parameters that reduce the perceptual difference:
+
+```text
+theta* = argmin Distance(z_current, z_target)
+```
+
+Later, ML models may predict a strong initial `theta` so optimisation does not have to start from scratch.
+
+See:
+
+- [`docs/architecture.md`](docs/architecture.md)
+- [`docs/roadmap.md`](docs/roadmap.md)
+- [`docs/decisions.md`](docs/decisions.md)
+
+---
+
+## Reference-tone matching
+
+A future example could be:
+
+```text
+Reference:
+Metallica - Enter Sandman-like rhythm character
+
+Your input:
+Your own guitar -> your own pickup -> your own audio interface
+
+GuitaPaD:
+Analyse target
+-> analyse your DI
+-> configure DSP
+-> render
+-> compare
+-> refine
+```
+
+The important distinction is that GuitaPaD should not merely load a universal fixed preset.
+
+The target is **adaptive matching**:
+
+```text
+target tone + your guitar -> personalised DSP parameters
+```
+
+Artist and song names can be useful descriptions of user-provided references, but GuitaPaD is not affiliated with those artists and does not distribute copyrighted reference recordings.
+
+Users should provide reference audio they are legally entitled to use.
+
+---
 
 ## Installation
 
@@ -62,45 +241,45 @@ Activate it on Windows:
 .\.venv\Scripts\Activate.ps1
 ```
 
-Install GuitaPaD with the GUI dependencies:
+Install the project with GUI dependencies:
 
 ```bash
 pip install -e ".[gui]"
 ```
 
-Start the desktop interface:
+Run the GUI:
 
 ```bash
 python tools/gui.py
 ```
 
+---
+
 ## Using another audio interface
 
-GuitaPaD is currently configured around the **Audient EVO 4**, so another interface may require a small configuration change.
+The current backend was built and validated with an **Audient EVO 4**.
 
-First, install the low-latency driver supplied by the manufacturer.
+Other audio interfaces should be possible, but device selection is not yet exposed through the GUI.
 
-Then inspect the audio devices visible to Python:
+First install the manufacturer's low-latency driver. On Windows, ASIO is strongly recommended.
+
+List the devices visible to Python:
 
 ```bash
 python -c "import sounddevice as sd; print(sd.query_devices()); print(sd.query_hostapis())"
 ```
 
-### 1. Select your interface
+### Device selection
 
-Device detection currently lives in:
+The current device-selection logic lives in:
 
 ```text
 src/guitapad/audio/sounddevice_backend.py
 ```
 
-At the moment, the backend looks for an ASIO device whose name contains:
+At present, the backend searches the available ASIO devices for an Audient device.
 
-```text
-AUDIENT
-```
-
-If you use another interface, adapt the device-selection logic to match the name reported by `sounddevice.query_devices()`.
+Until device selection is generalised, users of another interface can adapt the matching logic to the device name reported by `sounddevice`.
 
 For example:
 
@@ -112,96 +291,50 @@ if (
     return device_index
 ```
 
-A future version should make audio-device selection available directly from the GUI instead of requiring a source-code change.
+Automatic/configurable device selection is on the roadmap.
 
-### 2. Configure the channels
+### Channel mapping
 
-Audio channel settings are defined in:
+Audio-channel configuration lives in:
 
 ```text
 src/guitapad/audio/config.py
 ```
 
-The current development configuration uses:
+The current development setup uses zero-based Python channel indexes.
+
+For example:
 
 ```python
-input_channels = 4
-output_channels = 4
-
 guitar_input_index = 0
 left_output_index = 0
 right_output_index = 1
 ```
 
-Channel indexes are zero-based.
+If your guitar is connected to another input, change the input index accordingly.
 
-If your guitar is connected to the second input, for example:
+The configured input/output channel count must also be supported by the selected interface and driver.
 
-```python
-guitar_input_index = 1
-```
+### Buffer size
 
-Make sure `input_channels` and `output_channels` are supported by your interface and driver.
-
-### 3. Start conservatively
-
-The current development settings are:
+Current development settings:
 
 ```text
-Sample rate : 48,000 Hz
-Buffer      : 128 samples
+Sample rate  48,000 Hz
+Target       128 samples
 ```
 
-If your interface produces dropouts or callback errors, start with a larger hardware buffer and reduce it gradually.
+If a different interface produces dropouts or stream errors, start with a larger hardware buffer and reduce it gradually.
 
-The GUI reports useful real-time diagnostics including:
+The GUI exposes callback timing and stream diagnostics to help test new hardware.
 
-- maximum callback time
-- callback deadline load
-- stream errors
-- block-size mismatches
-- total reported I/O latency
-
-These measurements are especially useful when testing GuitaPaD on a new device.
-
-## Signal path
-
-The project is built around a simple modular chain:
-
-```text
-Guitar
-  |
-Audio interface
-  |
-Raw input
-  |
-35 Hz HPF
-  |
-DSP effects
-  |
-Master gain
-  |
-Safety limiter
-  |
-Audio interface output
-```
-
-Effects share a small common DSP interface and are processed sequentially.
-
-The real-time callback is intentionally kept predictable:
-
-- no file I/O
-- no GUI work
-- no network access
-- no printing/logging
-- minimal allocation
-- no blocking operations
+---
 
 ## Raw DI recording
 
-GuitaPaD can capture the raw guitar signal before the effect chain.
+GuitaPaD can capture the raw guitar input before the effect chain.
 
-Recordings are stored as:
+Current recording format:
 
 ```text
 48 kHz
@@ -209,66 +342,115 @@ mono
 24-bit PCM WAV
 ```
 
-During recording, the audio callback only copies samples into a preallocated RAM buffer.
+The real-time callback only copies samples into a preallocated RAM buffer.
 
-The WAV file is written after recording stops, outside the real-time callback.
+File writing happens after recording stops.
 
-This gives us a reproducible source signal for controlled A/B comparisons: the exact same guitar performance can be passed through different DSP algorithms offline.
+This is important for tone research because the **same performance** can be rendered repeatedly through different DSP chains and parameter configurations.
 
-## Project status
+---
 
-The real-time engine, GUI, metering, HPF, recording system, and basic DSP architecture are working.
+## Tone recipes
 
-Distortion and overdrive modelling are still experimental.
+A future tone recipe may be represented as a readable configuration rather than a proprietary preset:
 
-Several simple static waveshaping approaches have already been tested and deliberately rejected because they did not produce the desired pedal-like response.
-
-The next direction is physically motivated nonlinear circuit modelling, followed by controlled investigation of nonlinear aliasing and oversampling.
-
-Development notes and measurements are kept in:
-
-```text
-GuitaPaD_Daily_Log.md
+```json
+{
+  "name": "High-gain rhythm reference",
+  "input": {
+    "trim_db": -4.8
+  },
+  "pre_eq": {
+    "low_cut_hz": 78
+  },
+  "amp": {
+    "gain": 0.63,
+    "bias": 0.47
+  },
+  "cabinet": {
+    "model": "4x12_a"
+  },
+  "post_eq": {
+    "presence_db": 2.4
+  }
+}
 ```
+
+Eventually, community members should be able to share:
+
+- tone recipes
+- hardware-specific adaptations
+- measurements
+- DSP modules
+- cabinet models
+- ML experiments
+- reference-matching strategies
+
+without requiring everyone to use the same guitar or audio interface.
+
+---
 
 ## Contributing
 
-Contributions, experiments, measurements, and hardware reports are welcome.
+GuitaPaD is intended to grow as an open technical project.
 
-Interesting areas include:
+Useful contribution areas include:
 
 - support for additional audio interfaces
-- device selection from the GUI
+- GUI audio-device selection
 - Linux and macOS audio backends
-- guitar DSP algorithms
+- DSP effects
 - virtual-analog circuit modelling
+- amp modelling
+- cabinet and microphone modelling
 - anti-aliasing and oversampling
-- amp and cabinet processing
+- perceptual audio features
+- tone-matching loss functions
+- optimisation algorithms
+- ML parameter estimators
+- source separation for full-mix references
 - MIDI controller support
-- presets
-- profiling and real-time optimisation
-- testing on different hardware
+- preset / tone-recipe formats
+- profiling
+- hardware testing
 
-If you try GuitaPaD with another interface, an issue containing the following information would be especially useful:
+If you test GuitaPaD with another interface, useful issue information includes:
 
 - operating system
-- audio interface
+- interface model
 - driver/backend
 - sample rate
 - buffer size
 - measured latency
 - callback load
-- any stream errors or block-size mismatches
+- input/output channel mapping
+- stream errors or block mismatches
 
-## Philosophy
+---
 
-GuitaPaD is intentionally built from the DSP level upward.
+## Development notes
 
-The goal is not simply to wrap existing guitar plugins. The goal is to understand, implement, measure, and improve the signal-processing stages directly.
+The development journal is stored in:
 
-Python is used first because readability and fast iteration matter.
+```text
+GuitaPaD_Daily_Log.md
+```
 
-If profiling eventually shows that a specific real-time component needs a lower-level implementation, that decision should be based on measurements rather than assumptions.
+Longer project notes are kept under:
+
+```text
+docs/
+```
+
+---
+
+## Disclaimer
+
+GuitaPaD is an independent open-source project.
+
+Artist, band, song, amplifier, pedal, and product names may be used descriptively when discussing user-provided reference tones or compatibility. Such references do not imply endorsement or affiliation.
+
+Copyrighted recordings are not intended to be distributed as part of the repository.
 
 ---
 
